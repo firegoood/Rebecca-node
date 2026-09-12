@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
@@ -139,7 +141,7 @@ func ensureWindscribeInstalled(ctx context.Context) error {
 	if commandExists("windscribe-cli") && fileExists("/opt/windscribe/Windscribe") {
 		return ensureWindscribeSupportPackages()
 	}
-	url, extension, err := windscribePackageURL()
+	url, extension, err := windscribePackageURL(ctx)
 	if err != nil {
 		return err
 	}
@@ -163,11 +165,14 @@ func ensureWindscribeInstalled(ctx context.Context) error {
 
 	switch {
 	case extension == ".deb":
+		if !commandExists("dpkg-deb") {
+			return fmt.Errorf("dpkg-deb is required to install Windscribe CLI")
+		}
+		if err = runCommandContext(ctx, nil, "dpkg-deb", "--info", path); err != nil {
+			return fmt.Errorf("downloaded Windscribe package is not a valid Debian archive: %w", err)
+		}
 		if commandExists("dpkg") {
 			_ = runCommandContext(ctx, []string{"DEBIAN_FRONTEND=noninteractive"}, "dpkg", "--configure", "-a")
-		}
-		if err = runCommandContext(ctx, []string{"DEBIAN_FRONTEND=noninteractive"}, "apt-get", "update"); err != nil {
-			break
 		}
 		err = runCommandContext(ctx, []string{"DEBIAN_FRONTEND=noninteractive"}, "apt-get", "install", "-y", "--no-install-recommends", path)
 	case extension == ".rpm" && commandExists("zypper"):
@@ -193,23 +198,57 @@ func ensureWindscribeInstalled(ctx context.Context) error {
 	return ensureWindscribeSupportPackages()
 }
 
-func windscribePackageURL() (string, string, error) {
+func windscribePackageURL(ctx context.Context) (string, string, error) {
+	arch := runtime.GOARCH
+	var pattern string
 	switch {
-	case commandExists("apt-get") && runtime.GOARCH == "amd64":
-		return "https://windscribe.com/install/desktop/linux_deb_x64_cli", ".deb", nil
-	case commandExists("apt-get") && runtime.GOARCH == "arm64":
-		return "https://windscribe.com/install/desktop/linux_deb_arm64_cli", ".deb", nil
-	case commandExists("zypper") && runtime.GOARCH == "amd64":
-		return "https://windscribe.com/install/desktop/linux_rpm_opensuse_x64_cli", ".rpm", nil
-	case (commandExists("dnf") || commandExists("yum")) && runtime.GOARCH == "amd64":
-		return "https://windscribe.com/install/desktop/linux_rpm_x64_cli", ".rpm", nil
-	case (commandExists("dnf") || commandExists("yum")) && runtime.GOARCH == "arm64":
-		return "https://windscribe.com/install/desktop/linux_rpm_arm64_cli", ".rpm", nil
-	case commandExists("pacman") && runtime.GOARCH == "amd64":
-		return "https://windscribe.com/install/desktop/linux_zst_x64_cli", ".zst", nil
+	case commandExists("apt-get") && (arch == "amd64" || arch == "arm64"):
+		pattern = "windscribe-cli_*_" + arch + ".deb"
+	case commandExists("zypper") && arch == "amd64":
+		pattern = "windscribe-cli_*_amd64_opensuse.rpm"
+	case (commandExists("dnf") || commandExists("yum")) && (arch == "amd64" || arch == "arm64"):
+		pattern = "windscribe-cli_*_" + arch + "_fedora.rpm"
+	case commandExists("pacman") && arch == "amd64":
+		pattern = "windscribe-cli_*_amd64.pkg.tar.zst"
 	default:
 		return "", "", fmt.Errorf("Windscribe CLI does not publish a package for this distribution and architecture")
 	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/Windscribe/Desktop-App/releases/latest", nil)
+	if err != nil {
+		return "", "", err
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("User-Agent", "Rebecca-node")
+	response, err := (&http.Client{Timeout: 30 * time.Second}).Do(request)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve Windscribe release: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", "", fmt.Errorf("resolve Windscribe release: HTTP %d", response.StatusCode)
+	}
+	var release struct {
+		Assets []struct {
+			Name string `json:"name"`
+			URL  string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&release); err != nil {
+		return "", "", fmt.Errorf("decode Windscribe release: %w", err)
+	}
+	for _, asset := range release.Assets {
+		matched, _ := filepath.Match(pattern, asset.Name)
+		if matched && asset.URL != "" {
+			extension := ".rpm"
+			if strings.HasSuffix(asset.Name, ".deb") {
+				extension = ".deb"
+			} else if strings.HasSuffix(asset.Name, ".zst") {
+				extension = ".zst"
+			}
+			return asset.URL, extension, nil
+		}
+	}
+	return "", "", fmt.Errorf("Windscribe release has no CLI asset for %s", arch)
 }
 
 func ensureWindscribeSupportPackages() error {
