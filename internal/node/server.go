@@ -556,11 +556,17 @@ func (s *Server) startCachedConfig() {
 	cfg, err := xray.NewConfig(payload.Config, payload.PeerIP, s.settings)
 	if err != nil {
 		log.Printf("failed to decode cached config: %v", err)
+		if warning := s.applyHAProxyRuntime(payload.HAProxyRuntime); warning != "" {
+			log.Print(warning)
+		}
 		return
 	}
 	prepareTProxyConfig(cfg)
 	if err := s.core.Start(cfg); err != nil {
 		log.Printf("failed to start cached config: %v", err)
+		if warning := s.applyHAProxyRuntime(payload.HAProxyRuntime); warning != "" {
+			log.Print(warning)
+		}
 		return
 	}
 	s.mu.Lock()

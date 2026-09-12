@@ -99,6 +99,19 @@ func (m *haproxyManager) Apply(runtime *haproxyRuntime) error {
 	if output, err := exec.Command("haproxy", "-c", "-f", temporaryPath).CombinedOutput(); err != nil {
 		return fmt.Errorf("invalid HAProxy config: %s", strings.TrimSpace(string(output)))
 	}
+	// Resolve templates and certificates before stopping the currently served
+	// sites. A transient master/template failure must not turn a good runtime
+	// into a blank listener.
+	for _, site := range runtime.Sites {
+		if _, err := m.siteRoot(site); err != nil {
+			return err
+		}
+		if site.TLSMode != "" && site.TLSMode != "none" {
+			if _, err := m.siteCertificate(site); err != nil {
+				return err
+			}
+		}
+	}
 	if err := m.restartSitesLocked(runtime.Sites); err != nil {
 		return err
 	}
