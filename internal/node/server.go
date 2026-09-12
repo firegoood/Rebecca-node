@@ -105,7 +105,9 @@ func New(settings appconfig.Settings) (*Server, error) {
 	if err := server.wg.Apply(&wgRuntime{Inbounds: []wgRuntimeInbound{}}); err != nil {
 		log.Printf("failed to clear cached WireGuard runtime on startup: %v", err)
 	}
-	server.startCachedConfig()
+	if err := server.startCachedConfig(false); err != nil {
+		log.Printf("failed to start cached runtime: %v", err)
+	}
 	return server, nil
 }
 
@@ -548,10 +550,13 @@ func (s *Server) clearConfigCache() {
 	}
 }
 
-func (s *Server) startCachedConfig() {
+func (s *Server) startCachedConfig(restart bool) error {
 	payload, ok := s.loadConfigCache()
 	if !ok {
-		return
+		if restart {
+			return errors.New("runtime config cache is unavailable; sync config first")
+		}
+		return nil
 	}
 	cfg, err := xray.NewConfig(payload.Config, payload.PeerIP, s.settings)
 	if err != nil {
@@ -559,15 +564,20 @@ func (s *Server) startCachedConfig() {
 		if warning := s.applyHAProxyRuntime(payload.HAProxyRuntime); warning != "" {
 			log.Print(warning)
 		}
-		return
+		return err
 	}
 	prepareTProxyConfig(cfg)
-	if err := s.core.Start(cfg); err != nil {
+	if restart {
+		err = s.core.Restart(cfg)
+	} else {
+		err = s.core.Start(cfg)
+	}
+	if err != nil {
 		log.Printf("failed to start cached config: %v", err)
 		if warning := s.applyHAProxyRuntime(payload.HAProxyRuntime); warning != "" {
 			log.Print(warning)
 		}
-		return
+		return err
 	}
 	s.mu.Lock()
 	s.lastConfig = cfg
@@ -583,6 +593,7 @@ func (s *Server) startCachedConfig() {
 	s.applyAnyConnectRuntime(payload.AnyConnectRuntime)
 	s.applyHAProxyRuntime(payload.HAProxyRuntime)
 	s.applyExtraRuntime(payload.ExtraRuntime)
+	return nil
 }
 
 type downloadFile struct {
