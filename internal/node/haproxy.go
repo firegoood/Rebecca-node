@@ -57,9 +57,10 @@ type haproxySiteServer struct {
 }
 
 type haproxyManager struct {
-	dir   string
-	mu    sync.Mutex
-	sites []haproxySiteServer
+	dir       string
+	mu        sync.Mutex
+	sites     []haproxySiteServer
+	lastError string
 }
 
 const builtinHAProxySite = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Welcome</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111;color:#eee;font:16px system-ui}main{text-align:center;padding:2rem}h1{font-size:2.4rem;margin:.2rem}</style><main><h1>Welcome</h1><p>This website is served through HAProxy.</p></main>`
@@ -71,6 +72,16 @@ func newHAProxyManager(dataDir string) *haproxyManager {
 func (m *haproxyManager) Apply(runtime *haproxyRuntime) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	err := m.applyLocked(runtime)
+	if err != nil {
+		m.lastError = err.Error()
+	} else {
+		m.lastError = ""
+	}
+	return err
+}
+
+func (m *haproxyManager) applyLocked(runtime *haproxyRuntime) error {
 	if runtime == nil || !runtime.Enabled {
 		return m.stopLocked()
 	}
@@ -140,6 +151,12 @@ func (m *haproxyManager) Apply(runtime *haproxyRuntime) error {
 	case <-time.After(300 * time.Millisecond):
 		return nil
 	}
+}
+
+func (m *haproxyManager) lastErrorMessage() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastError
 }
 
 func (m *haproxyManager) stopLocked() error {

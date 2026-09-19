@@ -3,6 +3,7 @@ package node
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -557,6 +558,10 @@ func (s *Server) startCachedConfig(restart bool) error {
 			return errors.New("runtime config cache is unavailable; sync config first")
 		}
 		return nil
+	}
+	if err := s.reconcileManagedProxyServices(context.Background(), payload.Config); err != nil {
+		log.Printf("managed proxy reconciliation failed: %v", err)
+		return err
 	}
 	cfg, err := xray.NewConfig(payload.Config, payload.PeerIP, s.settings)
 	if err != nil {

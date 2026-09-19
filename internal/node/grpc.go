@@ -221,6 +221,9 @@ func (api *grpcAPI) SyncConfig(ctx context.Context, req *nodev1.RuntimeConfigReq
 	if err := api.server.validateDesiredRevision(req); err != nil {
 		return nil, err
 	}
+	if err := api.server.reconcileManagedProxyServices(ctx, req.GetConfigJson()); err != nil {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
 	var response *nodev1.RuntimeActionResponse
 	var err error
 	if api.server.core.Started() {
