@@ -1052,7 +1052,7 @@ func (s *Server) grpcAddUser(req *nodev1.InboundUserRequest, message string) (*n
 }
 
 func (s *Server) grpcUpdateRuntime(version string) error {
-	version = strings.TrimSpace(version)
+	version = normalizeXrayVersion(version)
 	if version == "" {
 		return status.Error(codes.InvalidArgument, "version is required")
 	}

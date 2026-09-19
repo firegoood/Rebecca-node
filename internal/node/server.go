@@ -733,7 +733,15 @@ func detectXrayAsset() (string, error) {
 }
 
 func validXrayVersion(version string) bool {
-	return xrayVersionPattern.MatchString(strings.TrimSpace(version))
+	return xrayVersionPattern.MatchString(normalizeXrayVersion(version))
+}
+
+func normalizeXrayVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if version != "" && !strings.HasPrefix(strings.ToLower(version), "v") {
+		return "v" + version
+	}
+	return version
 }
 
 func safeGeoFilename(name string) string {
