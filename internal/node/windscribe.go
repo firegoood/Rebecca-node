@@ -145,23 +145,39 @@ func ensureWindscribeInstalled(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	body, err := download(url, 5*time.Minute)
-	if err != nil {
-		return fmt.Errorf("download Windscribe CLI: %w", err)
+	var path string
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		body, downloadErr := download(url, 5*time.Minute)
+		if downloadErr != nil {
+			lastErr = downloadErr
+			continue
+		}
+		file, createErr := os.CreateTemp("", "rebecca-windscribe-*"+extension)
+		if createErr != nil {
+			return createErr
+		}
+		path = file.Name()
+		if _, writeErr := file.Write(body); writeErr != nil {
+			_ = file.Close()
+			_ = os.Remove(path)
+			return writeErr
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			_ = os.Remove(path)
+			return closeErr
+		}
+		if extension != ".deb" || !commandExists("dpkg-deb") || commandSucceeds("dpkg-deb", "--info", path) {
+			break
+		}
+		lastErr = fmt.Errorf("downloaded Windscribe package is not a valid Debian archive")
+		_ = os.Remove(path)
+		path = ""
 	}
-	file, err := os.CreateTemp("", "rebecca-windscribe-*"+extension)
-	if err != nil {
-		return err
+	if path == "" {
+		return fmt.Errorf("download Windscribe CLI: %w", lastErr)
 	}
-	path := file.Name()
 	defer os.Remove(path)
-	if _, err := file.Write(body); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
 
 	switch {
 	case extension == ".deb":

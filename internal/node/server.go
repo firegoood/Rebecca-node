@@ -871,7 +871,14 @@ func download(url string, timeout time.Duration) ([]byte, error) {
 		body, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
 		return nil, fmt.Errorf("http status %d: %s", res.StatusCode, summarizeDownloadBody(body))
 	}
-	return io.ReadAll(res.Body)
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	if res.ContentLength >= 0 && int64(len(body)) != res.ContentLength {
+		return nil, fmt.Errorf("incomplete download: received %d of %d bytes", len(body), res.ContentLength)
+	}
+	return body, nil
 }
 
 func downloadXrayCoreArchive(version string, asset string, timeout time.Duration) ([]byte, error) {
