@@ -554,6 +554,7 @@ func (s *Server) clearConfigCache() {
 func (s *Server) startCachedConfig(restart bool) error {
 	payload, ok := s.loadConfigCache()
 	if !ok {
+		s.clearCachedAuxiliaryRuntimes()
 		if restart {
 			return errors.New("runtime config cache is unavailable; sync config first")
 		}
@@ -599,6 +600,55 @@ func (s *Server) startCachedConfig(restart bool) error {
 	s.applyHAProxyRuntime(payload.HAProxyRuntime)
 	s.applyExtraRuntime(payload.ExtraRuntime)
 	return nil
+}
+
+// clearCachedAuxiliaryRuntimes prevents a missing/removed cache from leaving
+// native protocol daemons alive after Rebecca-node restarts.
+func (s *Server) clearCachedAuxiliaryRuntimes() {
+	if err := s.reconcileManagedProxyServices(context.Background(), "{}"); err != nil {
+		log.Printf("managed proxy startup cleanup failed: %v", err)
+	}
+	if err := s.ov.Apply(&ovRuntime{Inbounds: []ovRuntimeInbound{}}); err != nil {
+		log.Printf("OpenVPN startup cleanup failed: %v", err)
+	}
+	if err := s.l2tp.Apply(&l2tpRuntime{Inbounds: []l2tpRuntimeInbound{}}); err != nil {
+		log.Printf("L2TP startup cleanup failed: %v", err)
+	}
+	if err := s.pptp.Apply(&pptpRuntime{Inbounds: []pptpRuntimeInbound{}}); err != nil {
+		log.Printf("PPTP startup cleanup failed: %v", err)
+	}
+	if err := s.wg.Apply(&wgRuntime{Inbounds: []wgRuntimeInbound{}}); err != nil {
+		log.Printf("WireGuard startup cleanup failed: %v", err)
+	}
+	if err := s.remoteAccess.ApplyIKEv2(&remoteAccessRuntime{Inbounds: []remoteAccessRuntimeInbound{}}); err != nil {
+		log.Printf("IKEv2 startup cleanup failed: %v", err)
+	}
+	if err := s.remoteAccess.ApplyAnyConnect(&remoteAccessRuntime{Inbounds: []remoteAccessRuntimeInbound{}}); err != nil {
+		log.Printf("AnyConnect startup cleanup failed: %v", err)
+	}
+	if s.haproxy != nil {
+		if err := s.haproxy.Apply(&haproxyRuntime{}); err != nil {
+			log.Printf("HAProxy startup cleanup failed: %v", err)
+		}
+	}
+	if s.sshProxy != nil {
+		if err := s.sshProxy.Apply(&extraRuntime{}); err != nil {
+			log.Printf("SSH startup cleanup failed: %v", err)
+		}
+	}
+	if s.external != nil {
+		if err := s.external.Apply(&extraRuntime{}); err != nil {
+			log.Printf("external proxy startup cleanup failed: %v", err)
+		}
+	}
+	if s.extraVPN != nil {
+		if err := s.extraVPN.Apply(&extraRuntime{}); err != nil {
+			log.Printf("extra VPN startup cleanup failed: %v", err)
+		}
+	}
+	if err := s.ipBlocks.Clear(context.Background()); err != nil {
+		log.Printf("source IP startup cleanup failed: %v", err)
+	}
 }
 
 type downloadFile struct {
