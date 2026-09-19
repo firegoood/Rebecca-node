@@ -38,6 +38,7 @@ func (s *Server) reconcileManagedProxyServices(ctx context.Context, raw string) 
 	managed := make([]managedProxy, 0)
 	ports := map[uint32]bool{}
 	locations := map[string]string{}
+	windscribeCount := 0
 	for _, outbound := range mapList(payload["outbounds"]) {
 		kind := managedProxyKind(outbound)
 		if kind == "" {
@@ -52,6 +53,12 @@ func (s *Server) reconcileManagedProxyServices(ctx context.Context, raw string) 
 		}
 		ports[port] = true
 		item := managedProxy{kind: kind, tag: strings.TrimSpace(managedString(outbound["tag"])), port: port, username: username, password: password}
+		if kind == "windscribe" {
+			windscribeCount++
+			if windscribeCount > 1 {
+				return fmt.Errorf("only one Windscribe outbound can run on a node")
+			}
+		}
 		item.country = strings.ToLower(strings.TrimSpace(managedString(outbound["rebecca_proxy_location"])))
 		if item.country == "" {
 			item.country = managedCountry(item.tag, kind)
