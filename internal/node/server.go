@@ -694,7 +694,7 @@ func nodeUpdateArgs(channel string, version string) ([]string, error) {
 			return append(args, "--dev"), nil
 		default:
 			if strings.HasPrefix(strings.ToLower(normalizedVersion), "dev-") {
-				return append(args, "--dev"), nil
+				return append(args, "--version", normalizedVersion), nil
 			}
 			if !releaseVersionPattern.MatchString(normalizedVersion) {
 				return nil, errors.New("invalid update version")
