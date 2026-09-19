@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -79,6 +80,9 @@ func (s *Server) reconcileManagedProxyServices(ctx context.Context, raw string) 
 		return err
 	}
 	for _, item := range managed {
+		if !managedProxyOwnsPort(item) && !localPortAvailable(item.port) {
+			return fmt.Errorf("managed %s outbound %q cannot use local port %d: the port is already occupied", item.kind, item.tag, item.port)
+		}
 		switch item.kind {
 		case "tor":
 			if err := torProxyHealthy(item); err != nil {
@@ -95,6 +99,31 @@ func (s *Server) reconcileManagedProxyServices(ctx context.Context, raw string) 
 		}
 	}
 	return nil
+}
+
+func managedProxyOwnsPort(item managedProxy) bool {
+	switch item.kind {
+	case "tor":
+		if fileExists(filepath.Join("/etc/systemd/system", fmt.Sprintf("rebecca-tor-%d.service", item.port))) {
+			return true
+		}
+		raw, err := os.ReadFile("/etc/tor/torrc")
+		return err == nil && strings.Contains(string(raw), fmt.Sprintf("SocksPort 127.0.0.1:%d", item.port))
+	case "windscribe":
+		raw, err := os.ReadFile(filepath.Join("/etc/systemd/system", windscribeRelayUnitName))
+		return err == nil && strings.Contains(string(raw), fmt.Sprintf("TCP4-LISTEN:%d", item.port))
+	default:
+		return false
+	}
+}
+
+func localPortAvailable(port uint32) bool {
+	listener, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return false
+	}
+	_ = listener.Close()
+	return true
 }
 
 func torProxyHealthy(item managedProxy) error {
