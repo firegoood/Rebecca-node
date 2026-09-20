@@ -85,11 +85,9 @@ func (s *Server) reconcileManagedProxyServices(ctx context.Context, raw string) 
 		}
 		switch item.kind {
 		case "tor":
-			if err := torProxyHealthy(item); err != nil {
-				if err := applyTorProxy(torProxyConfig{SocksPort: item.port, ExitCountry: item.country, StrictExit: true}); err != nil {
-					return fmt.Errorf("configure Tor outbound %s: %w", item.tag, err)
-				}
-			}
+			// Tor setup is an explicit action. Reconciliation only cleans stale
+			// units; it must never restart a live Tor circuit on every SyncConfig.
+			continue
 		case "windscribe":
 			if err := testAuthenticatedSocks5Connect(int(item.port), item.username, item.password, "example.com", 80); err != nil {
 				if _, err := configureWindscribe(ctx, windscribeProxyConfig{Action: "apply", Location: item.country, SocksPort: item.port, ProxyUsername: item.username, ProxyPassword: item.password}); err != nil {
@@ -124,25 +122,6 @@ func localPortAvailable(port uint32) bool {
 	}
 	_ = listener.Close()
 	return true
-}
-
-func torProxyHealthy(item managedProxy) error {
-	if err := testSocks5Connect(int(item.port), "example.com", 80); err != nil {
-		return err
-	}
-	path := filepath.Join("/etc/tor/rebecca", fmt.Sprintf("rebecca-tor-%d.torrc", item.port))
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil // legacy Tor service has no per-instance file
-	}
-	want := ""
-	if item.country != "" {
-		want = "ExitNodes {" + item.country + "}"
-	}
-	if !strings.Contains(string(raw), want) {
-		return fmt.Errorf("Tor exit country changed")
-	}
-	return nil
 }
 
 func mapList(value any) []map[string]any {
